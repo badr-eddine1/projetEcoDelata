@@ -29,8 +29,10 @@ ProjetEcodelta/
 │
 └── ecodelta_ai/             # Traitement IA
     ├── db.py                # Connexion PostgreSQL (copie)
-    ├── scoring.py           # Scoring des AO via API OpenAI
-    └── .env                 # Config BDD + clé API (non versionné)
+    ├── scoring.py            # Scoring des AO via API OpenAI
+    ├── fiches_techniques.py  # Génération de fiches techniques produits
+    ├── devis.py              # Génération de devis (client + produits)
+    └── .env                  # Config BDD + clé API (non versionné)
 ```
 
 ## Base de données (PostgreSQL — `ecodelta_db`)
@@ -97,6 +99,54 @@ WHERE score_ia >= 7
 ORDER BY score_ia DESC;
 ```
 
+## 3. Fiches techniques (`ecodelta_ai/fiches_techniques.py`)
+
+Génère automatiquement une fiche technique commerciale pour chaque produit du catalogue, via l'API OpenAI.
+
+**Fonctionnement :**
+- Récupère les produits où `fiche_technique IS NULL`
+- Génère : titre accrocheur, présentation orientée bénéfices, caractéristiques techniques, applications recommandées (2-3 secteurs max, sélectionnés et justifiés selon le produit — pas une liste générique des 5 secteurs à chaque fois), prix indicatif
+- Stocke le résultat en JSON dans la colonne `fiche_technique` (type `JSONB`)
+
+**Lancer :**
+```bash
+cd ecodelta_ai
+python fiches_techniques.py
+```
+
+**Prérequis BDD (une seule fois) :**
+```sql
+ALTER TABLE produits ADD COLUMN fiche_technique JSONB;
+```
+
+## 4. Génération de devis (`ecodelta_ai/devis.py`)
+
+Combine un client + une liste de produits/quantités pour générer un devis.
+
+**Fonctionnement :**
+- Les **calculs de prix sont faits en Python** (fiable, aucun risque d'erreur de calcul par l'IA)
+- L'IA rédige uniquement le texte d'introduction/conclusion, personnalisé selon le client
+- Le devis est enregistré en base avec `statut = "brouillon"` et `valide_par_humain = False`
+
+**Lancer (exemple) :**
+```python
+from devis import generer_devis
+generer_devis(client_id=1, produits_quantites=[(1, 2), (4, 1)])
+```
+
+**Règle de sécurité (conforme au brief) :** un devis généré par l'IA n'est jamais envoyé directement au client — il reste en statut `brouillon` jusqu'à validation humaine explicite (mise à jour manuelle de `valide_par_humain`).
+
+## ⚠️ Données actuelles : fictives / de test
+
+Les tables `produits` et `clients` contiennent actuellement des **données de test**, construites à partir des informations publiques du site ecodelta.ma — **pas le vrai catalogue produits ni les vrais clients de l'entreprise**.
+
+Avant mise en production réelle, il faut :
+1. Récupérer le vrai catalogue produits/prix auprès du référent Ecodelta
+2. Récupérer une vraie liste de clients/prospects
+3. Vider les tables de test et importer les vraies données (`DELETE FROM produits; DELETE FROM clients;` puis import)
+
+Le code des 3 scripts IA (`scoring.py`, `fiches_techniques.py`, `devis.py`) n'a besoin d'aucune modification pour fonctionner avec les vraies données — seul le contenu des tables change.
+
 ## Configuration (`.env`)
 
 Chaque dossier a son propre `.env` (non versionné, à créer localement) :
@@ -118,15 +168,21 @@ OPENAI_API_KEY=xxx
 
 - **~3900 AO** scrapés depuis marchespublics.gov.ma
 - **37 AO** identifiés comme réellement pertinents (score ≥ 7)
-- Coût API total : quelques centimes (gpt-4o-mini)
+- **9 fiches techniques** générées (catalogue de test)
+- **1 devis** généré et testé (pipeline validé)
+- Coût API total cumulé (scoring + fiches + devis) : quelques centimes (gpt-4o-mini)
 
 ## Prochaines étapes
 
-- [ ] Génération automatique de fiches techniques (à partir de la table `produits`)
-- [ ] Génération automatique de devis (produits + client)
+- [x] Scoring IA des appels d'offres
+- [x] Génération de fiches techniques
+- [x] Génération de devis (pipeline de base)
+- [ ] Remplacer les données de test par le vrai catalogue produits et les vrais clients Ecodelta
+- [ ] Ajouter la TVA / conditions de paiement dans le calcul des devis
 - [ ] Pré-filtrage par mots-clés au niveau du scraper (réduire le volume brut)
 - [ ] Automatisation de l'exécution périodique du scraper (planification quotidienne/hebdomadaire)
 - [ ] Intégration avec le module frontend (API REST à construire côté backend)
+- [ ] Export PDF des fiches techniques et devis (actuellement JSON/texte uniquement)
 
 ## Stack technique
 
